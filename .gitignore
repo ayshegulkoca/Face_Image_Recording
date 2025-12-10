@@ -1,0 +1,11 @@
+# PyCharm ayarları
+.idea/
+
+# Sanal ortamlar
+.venv/
+venv/
+.venv1/
+
+# Python bytecode
+__pycache__/
+*.pyc
