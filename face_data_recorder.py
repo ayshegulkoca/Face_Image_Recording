@@ -2,13 +2,16 @@ import cv2
 import mediapipe as mp
 import os
 import sys
+import csv
 from datetime import datetime
 from openpyxl import Workbook, load_workbook
 import time
 
 # ================= CONFIG =================
 OUTPUT_DIR = "recorded_faces"
-ATTENDANCE_FILE = "attendance.xlsx"
+ATTENDANCE_XLSX = "attendance.xlsx"
+ATTENDANCE_CSV = "attendance.csv"
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ================= STUDENT NAME =================
@@ -22,8 +25,9 @@ def save_attendance(name):
     today = datetime.now().strftime("%Y-%m-%d")
     time_now = datetime.now().strftime("%H:%M:%S")
 
-    if os.path.exists(ATTENDANCE_FILE):
-        wb = load_workbook(ATTENDANCE_FILE)
+    # ---------- EXCEL ----------
+    if os.path.exists(ATTENDANCE_XLSX):
+        wb = load_workbook(ATTENDANCE_XLSX)
     else:
         wb = Workbook()
         wb.remove(wb.active)
@@ -37,12 +41,22 @@ def save_attendance(name):
     names = [row[0] for row in ws.iter_rows(min_row=2, values_only=True)]
     if name not in names:
         ws.append([name, time_now])
-        wb.save(ATTENDANCE_FILE)
+        wb.save(ATTENDANCE_XLSX)
+
+    # ---------- CSV ----------
+    file_exists = os.path.exists(ATTENDANCE_CSV)
+
+    with open(ATTENDANCE_CSV, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+
+        if not file_exists:
+            writer.writerow(["Date", "Name", "Time"])
+
+        writer.writerow([today, name, time_now])
 
 # ================= CAMERA (HIDDEN) =================
 def run_camera_hidden(name):
     mp_face_detection = mp.solutions.face_detection
-
     cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
@@ -78,25 +92,22 @@ def run_camera_hidden(name):
                     face = frame[y:y + bh, x:x + bw]
 
                     if face.size != 0 and not face_saved:
-                        img_path = os.path.join(
-                            OUTPUT_DIR, f"{name}.jpg"
-                        )
+                        img_path = os.path.join(OUTPUT_DIR, f"{name}.jpg")
                         cv2.imwrite(img_path, face)
+
                         save_attendance(name)
                         face_saved = True
-                        print(f"✅ Face saved for {name}")
+                        print(f"✅ Saved: {name}")
                         break
 
-            # 🕒 Güvenlik: max 5 saniye kamera açık kalsın
             if face_saved or (time.time() - start_time > 5):
                 break
 
-    # ===== CLEAN EXIT =====
     cap.release()
     cv2.destroyAllWindows()
-    print("✔ Camera closed (hidden mode)")
+    print("✔ Camera closed")
 
 # ================= MAIN =================
 if __name__ == "__main__":
-    print(f"Starting hidden attendance for: {student_name}")
+    print(f"Starting attendance for: {student_name}")
     run_camera_hidden(student_name)
