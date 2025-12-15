@@ -1,8 +1,10 @@
 import cv2
 import mediapipe as mp
 import os
-from openpyxl import Workbook, load_workbook
+import sys
 from datetime import datetime
+from openpyxl import Workbook, load_workbook
+import time
 
 # ================= CONFIG =================
 OUTPUT_DIR = "recorded_faces"
@@ -10,77 +12,91 @@ ATTENDANCE_FILE = "attendance.xlsx"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ================= STUDENT NAME =================
-student_name = input("Enter student name: ").strip()
+if len(sys.argv) > 1:
+    student_name = sys.argv[1]
+else:
+    student_name = "Unknown"
 
-# ================= MEDIAPIPE =================
-mp_face_detection = mp.solutions.face_detection
-mp_drawing = mp.solutions.drawing_utils
-
-cap = cv2.VideoCapture(0)
-
-# ================= ATTENDANCE FUNCTION =================
-def mark_attendance(name):
-    now = datetime.now()
-    date = now.strftime("%Y-%m-%d")
-    time = now.strftime("%H:%M:%S")
+# ================= ATTENDANCE =================
+def save_attendance(name):
+    today = datetime.now().strftime("%Y-%m-%d")
+    time_now = datetime.now().strftime("%H:%M:%S")
 
     if os.path.exists(ATTENDANCE_FILE):
         wb = load_workbook(ATTENDANCE_FILE)
-        ws = wb.active
     else:
         wb = Workbook()
-        ws = wb.active
-        ws.append(["Name", "Date", "Time"])
+        wb.remove(wb.active)
 
-    ws.append([name, date, time])
-    wb.save(ATTENDANCE_FILE)
+    if today in wb.sheetnames:
+        ws = wb[today]
+    else:
+        ws = wb.create_sheet(today)
+        ws.append(["Name", "Time"])
 
-attendance_marked = False
-img_count = 0
+    names = [row[0] for row in ws.iter_rows(min_row=2, values_only=True)]
+    if name not in names:
+        ws.append([name, time_now])
+        wb.save(ATTENDANCE_FILE)
 
-# ================= MAIN LOOP =================
-with mp_face_detection.FaceDetection(
+# ================= CAMERA (HIDDEN) =================
+def run_camera_hidden(name):
+    mp_face_detection = mp.solutions.face_detection
+
+    cap = cv2.VideoCapture(0)
+
+    if not cap.isOpened():
+        print("❌ Camera could not be opened")
+        return
+
+    with mp_face_detection.FaceDetection(
         model_selection=0,
-        min_detection_confidence=0.5
-) as face_detection:
+        min_detection_confidence=0.6
+    ) as face_detection:
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+        start_time = time.time()
+        face_saved = False
 
-        h, w, _ = frame.shape
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = face_detection.process(rgb)
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        if results.detections:
-            for detection in results.detections:
-                bbox = detection.location_data.relative_bounding_box
-                x = int(bbox.xmin * w)
-                y = int(bbox.ymin * h)
-                bw = int(bbox.width * w)
-                bh = int(bbox.height * h)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = face_detection.process(rgb)
 
-                face_crop = frame[y:y + bh, x:x + bw]
+            if results.detections:
+                for det in results.detections:
+                    bbox = det.location_data.relative_bounding_box
+                    h, w, _ = frame.shape
 
-                if face_crop.size != 0:
-                    filename = f"{OUTPUT_DIR}/{student_name}_{img_count}.jpg"
-                    cv2.imwrite(filename, face_crop)
-                    img_count += 1
+                    x = int(bbox.xmin * w)
+                    y = int(bbox.ymin * h)
+                    bw = int(bbox.width * w)
+                    bh = int(bbox.height * h)
 
-                mp_drawing.draw_detection(frame, detection)
+                    face = frame[y:y + bh, x:x + bw]
 
-                if not attendance_marked:
-                    mark_attendance(student_name)
-                    attendance_marked = True
-                    print(f"Attendance marked for {student_name}")
+                    if face.size != 0 and not face_saved:
+                        img_path = os.path.join(
+                            OUTPUT_DIR, f"{name}.jpg"
+                        )
+                        cv2.imwrite(img_path, face)
+                        save_attendance(name)
+                        face_saved = True
+                        print(f"✅ Face saved for {name}")
+                        break
 
-        cv2.imshow("Student Attendance System", frame)
+            # 🕒 Güvenlik: max 5 saniye kamera açık kalsın
+            if face_saved or (time.time() - start_time > 5):
+                break
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+    # ===== CLEAN EXIT =====
+    cap.release()
+    cv2.destroyAllWindows()
+    print("✔ Camera closed (hidden mode)")
 
-cap.release()
-cv2.destroyAllWindows()
-print("Attendance saved in:", ATTENDANCE_FILE)
-
+# ================= MAIN =================
+if __name__ == "__main__":
+    print(f"Starting hidden attendance for: {student_name}")
+    run_camera_hidden(student_name)
